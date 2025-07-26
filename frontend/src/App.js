@@ -1,20 +1,17 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Summary from "./pages/Summary";
-import Navbar from "./components/Navbar";
+import Layout from "./components/Layout";
 
 function App() {
   return (
     <Router>
-      <div>
-        <Navbar />
-        <div className="container mx-auto p-4">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/summary" element={<Summary />} />
-          </Routes>
-        </div>
-      </div>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/summary" element={<Summary />} />
+        </Route>
+      </Routes>
     </Router>
   );
 }

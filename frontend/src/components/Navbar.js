@@ -1,14 +1,21 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 function Navbar() {
+  const location = useLocation();
+
+  const linkStyle = (path) =>
+    `hover:underline ${
+      location.pathname === path ? "font-bold text-blue-300" : ""
+    }`;
+
   return (
-    <nav className="bg-gray-800 text-white p-4">
-      <div className="flex space-x-4">
-        <Link to="/" className="hover:underline">
+    <nav className="bg-gray-900 text-white px-6 py-4 shadow">
+      <div className="flex space-x-6 items-center">
+        <Link to="/" className={linkStyle("/")}>
           Home
         </Link>
-        <Link to="/summary" className="hover:underline">
+        <Link to="/summary" className={linkStyle("/summary")}>
           Summary
         </Link>
       </div>
