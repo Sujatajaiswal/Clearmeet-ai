@@ -5,34 +5,52 @@ const axios = require("axios");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const rateLimit = require("express-rate-limit");
+
+const parseDeadlinesFromText = require("./helpers/deadlineParser");
 
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Ensure the uploads directory exists
+if (!fs.existsSync("uploads")) {
+  fs.mkdirSync("uploads");
+}
+
 // Middleware
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      /\.app\.github\.dev$/, // GitHub Codespaces
-    ],
+    origin: ["http://localhost:3000", /\.app\.github\.dev$/],
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
   })
 );
-
 app.use(express.json());
 
-// Multer setup for audio upload
-const upload = multer({ dest: "uploads/" });
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+});
+app.use(limiter);
 
-// ✅ Health check
+const upload = multer({
+  dest: "uploads/",
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["audio/mpeg", "audio/wav"];
+    if (!allowedTypes.includes(file.mimetype)) {
+      return cb(new Error("Only .mp3 and .wav files are allowed"));
+    }
+    cb(null, true);
+  },
+});
+
+// Test route
 app.get("/", (req, res) => {
   res.send("✅ Clearmeet AI backend is running!");
 });
 
-// ✅ POST /api/summarize — Summarize text transcript
+// Summarization route
 app.post("/api/summarize", async (req, res) => {
   const { transcript } = req.body;
 
@@ -41,6 +59,17 @@ app.post("/api/summarize", async (req, res) => {
   }
 
   try {
+    const prompt = `
+You are a meeting assistant. Read the following transcript and extract:
+
+1. Summary of discussion points.
+2. Action items (task, assignee, deadline).
+3. Maintain speaker awareness like: [Speaker Name]: message.
+
+Transcript:
+${transcript}
+`;
+
     const togetherRes = await axios.post(
       "https://api.together.xyz/v1/chat/completions",
       {
@@ -48,11 +77,11 @@ app.post("/api/summarize", async (req, res) => {
         messages: [
           {
             role: "user",
-            content: `Summarize this meeting transcript and extract key points:\n${transcript}`,
+            content: prompt,
           },
         ],
         max_tokens: 1024,
-        temperature: 0.7,
+        temperature: 0.4,
         top_p: 0.9,
       },
       {
@@ -64,19 +93,23 @@ app.post("/api/summarize", async (req, res) => {
     );
 
     const summary = togetherRes.data.choices[0].message.content;
-    res.json({ summary });
+    const deadlines = parseDeadlinesFromText(summary);
+
+    res.json({ summary, deadlines });
   } catch (error) {
-    console.error("Together.ai Error:", error?.response?.data || error.message);
+    console.error(
+      "Together API Error:",
+      error?.response?.data || error.message
+    );
     res.status(500).json({ error: "Failed to generate summary." });
   }
 });
 
-// ✅ POST /api/transcribe — Transcribe .mp3/.wav audio using AssemblyAI
+// Transcription route
 app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
   const filePath = req.file.path;
 
   try {
-    // Step 1: Upload audio to AssemblyAI
     const uploadRes = await axios({
       method: "post",
       url: "https://api.assemblyai.com/v2/upload",
@@ -89,7 +122,6 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
     const audio_url = uploadRes.data.upload_url;
 
-    // Step 2: Request transcription
     const transcriptRes = await axios.post(
       "https://api.assemblyai.com/v2/transcript",
       { audio_url },
@@ -102,7 +134,6 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
     const transcriptId = transcriptRes.data.id;
 
-    // Step 3: Poll for completion
     const pollTranscription = async () => {
       try {
         const polling = await axios.get(
@@ -115,16 +146,15 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
         );
 
         if (polling.data.status === "completed") {
-          fs.unlinkSync(filePath); // cleanup
+          fs.unlinkSync(filePath);
           return res.json({ transcript: polling.data.text });
         } else if (polling.data.status === "error") {
           fs.unlinkSync(filePath);
           return res.status(500).json({ error: polling.data.error });
         } else {
-          setTimeout(pollTranscription, 3000); // retry in 3 sec
+          setTimeout(pollTranscription, 3000); // Retry after delay
         }
       } catch (pollError) {
-        console.error("Polling Error:", pollError.message);
         fs.unlinkSync(filePath);
         return res.status(500).json({ error: "Polling failed" });
       }
@@ -132,13 +162,11 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
     pollTranscription();
   } catch (err) {
-    console.error("AssemblyAI Error:", err.message);
     fs.unlinkSync(filePath);
     res.status(500).json({ error: "Transcription failed" });
   }
 });
 
-// ✅ Start server
 app.listen(PORT, () => {
   console.log(`✅ Clearmeet AI backend running at http://localhost:${PORT}`);
 });
