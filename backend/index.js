@@ -6,8 +6,11 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const rateLimit = require("express-rate-limit");
-
 const parseDeadlinesFromText = require("./helpers/deadlineParser");
+const fetch = require("node-fetch");
+
+// 🔥 NEW: Import Slack Route
+const slackRoute = require("./routes/slack");
 
 dotenv.config();
 const app = express();
@@ -44,6 +47,9 @@ const upload = multer({
     cb(null, true);
   },
 });
+
+// 🔥 NEW: Slack route
+app.use("/api/send-to-slack", slackRoute);
 
 // Test route
 app.get("/", (req, res) => {
@@ -152,7 +158,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
           fs.unlinkSync(filePath);
           return res.status(500).json({ error: polling.data.error });
         } else {
-          setTimeout(pollTranscription, 3000); // Retry after delay
+          setTimeout(pollTranscription, 3000); // Retry
         }
       } catch (pollError) {
         fs.unlinkSync(filePath);
